@@ -1,0 +1,9 @@
+.python-version
+.venv
+.env
+datafiles
+.DS_Store
+data_pipeline/__pycache__
+catboost_info
+.metaflow
+wandb/
