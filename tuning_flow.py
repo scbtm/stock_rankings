@@ -48,31 +48,37 @@ class TuningFlow(FlowSpec):
         xtest = xtest.to_pandas()
         ytest = ytest.to_pandas().values
 
+        #dummy train set:
+        xtrain_dummy = pd.concat([xtrain, xval, xcal])
+        ytrain_dummy = np.concatenate([ytrain, yval, ycal])
+
 
         #train a dummy classifier to establish some basic baselines
         #Random classifier
         dummy = DummyClassifier(strategy='uniform')
-        dummy.fit(xtrain, ytrain)
-        dummy_preds = dummy.predict(xval)
+        dummy.fit(xtrain_dummy, ytrain_dummy)
+        dummy_preds = dummy.predict(xtest)
 
         metrics = {}
-        metrics['random_dummy'] = {'accuracy': accuracy_score(yval, dummy_preds),
-                                   'precision': precision_score(yval, dummy_preds),
-                                   'recall': recall_score(yval, dummy_preds),
-                                   'f1': f1_score(yval, dummy_preds),
-                                   'balanced_accuracy': balanced_accuracy_score(yval, dummy_preds)}
+        metrics['random_dummy'] = {'accuracy': accuracy_score(ytest, dummy_preds),
+                                   'precision': precision_score(ytest, dummy_preds),
+                                   'recall': recall_score(ytest, dummy_preds),
+                                   'f1': f1_score(ytest, dummy_preds),
+                                   'balanced_accuracy': balanced_accuracy_score(ytest, dummy_preds)}
         
 
         #Most frequent classifier        
         dummy = DummyClassifier(strategy='most_frequent')
-        dummy.fit(xtrain, ytrain)
-        dummy_preds = dummy.predict(xval)
+        dummy.fit(xtrain_dummy, ytrain_dummy)
+        dummy_preds = dummy.predict(xtest)
 
-        metrics['most_frequent_dummy'] = {'accuracy': accuracy_score(yval, dummy_preds),
-                                          'precision': precision_score(yval, dummy_preds),
-                                          'recall': recall_score(yval, dummy_preds),
-                                          'f1': f1_score(yval, dummy_preds),
-                                          'balanced_accuracy': balanced_accuracy_score(yval, dummy_preds)}
+        del xtrain_dummy, ytrain_dummy
+
+        metrics['most_frequent_dummy'] = {'accuracy': accuracy_score(ytest, dummy_preds),
+                                          'precision': precision_score(ytest, dummy_preds),
+                                          'recall': recall_score(ytest, dummy_preds),
+                                          'f1': f1_score(ytest, dummy_preds),
+                                          'balanced_accuracy': balanced_accuracy_score(ytest, dummy_preds)}
         self.baseline_metrics = metrics
 
         dataset = {}
@@ -208,10 +214,10 @@ class TuningFlow(FlowSpec):
 
         self.study = study
 
-        self.next(self.train_final_model)
+        self.next(self.train_best_model)
 
     @step
-    def train_final_model(self):
+    def train_best_model(self):
         """
         This step is used to train the final model with the best hyperparameters on the full dataset. 
         """
@@ -236,13 +242,141 @@ class TuningFlow(FlowSpec):
 
         self.model = clf
 
-        self.next(self.end)
+        self.next(self.calibrate_model)
 
+    @step
     def calibrate_model(self):
 
+        from sklearn.isotonic import IsotonicRegression
+        import catboost
+
+        model = self.model
+        xcal, ycal = self.dataset['xcal'], self.dataset['ycal']
+
+        cal_pool = catboost.Pool(data = xcal, label = ycal, feature_names = list(xcal.columns))
+
+        predicted_proba = model.predict_proba(cal_pool)[:, 1]
+
+        iso_reg = IsotonicRegression(y_min = 0, y_max = 1, out_of_bounds = 'clip').fit(predicted_proba, ycal)
+
+        self.calibration_model = iso_reg
+
+        self.next(self.evaluate_model)
+
+    @step
+    def evaluate_model(self):
+        """
+        This step is used to evaluate the model on the test dataset. 
+        """
+        def expected_calibration_error(y, proba, bins='fd'):
+            import numpy as np  # Import numpy for numerical operations
+
+            # Compute the histogram of predicted probabilities to determine the bins
+            bin_count, bin_edges = np.histogram(proba, bins=bins)
+            n_bins = len(bin_count)  # Number of bins
+
+            # Adjust the first bin edge slightly to include the exact minimum probability
+            bin_edges[0] -= 1e-8
+
+            # Assign each probability to a bin
+            bin_id = np.digitize(proba, bin_edges, right=True) - 1
+
+            # Calculate the sum of true labels for each bin
+            bin_ysum = np.bincount(bin_id, weights=y, minlength=n_bins)
+
+            # Calculate the sum of probabilities for each bin
+            bin_probasum = np.bincount(bin_id, weights=proba, minlength=n_bins)
+
+            # Calculate the average of true labels in each bin
+            bin_ymean = np.divide(bin_ysum, bin_count, out=np.zeros(n_bins), where=bin_count > 0)
+
+            # Calculate the average of probabilities in each bin
+            bin_probamean = np.divide(bin_probasum, bin_count, out=np.zeros(n_bins), where=bin_count > 0)
+
+            # Calculate the Expected Calibration Error (ECE)
+            ece = np.abs((bin_probamean - bin_ymean) * bin_count).sum() / len(proba)
+
+            # Return the ECE
+            return ece
+        
+
+        import pandas as pd
+        import numpy as np
+        from sklearn.metrics import balanced_accuracy_score, accuracy_score, precision_score, recall_score, f1_score
+
+        model = self.model
+        calibration_model = self.calibration_model
+        xtest, ytest = self.dataset['xtest'], self.dataset['ytest']
+        
+
+        predicted_proba = model.predict_proba(xtest)[:, 1]
+        predicted_proba = calibration_model.predict(predicted_proba)
+        preds = (predicted_proba >= 0.5).astype(int)
+
+        accuracy = accuracy_score(y_true = ytest, y_pred = preds)
+        balanced_accuracy = balanced_accuracy_score(y_true = ytest, y_pred = preds)
+        precision = precision_score(y_true = ytest, y_pred = preds)
+        recall = recall_score(y_true = ytest, y_pred = preds)
+        f1 = f1_score(y_true = ytest, y_pred = preds)
+
+        ece = expected_calibration_error(ytest, predicted_proba)
+
+        self.metrics = {'accuracy': accuracy,
+                        'balanced_accuracy': balanced_accuracy,
+                        'precision': precision,
+                        'recall': recall,
+                        'f1': f1,
+                        'ece': ece}
+        
+
+        #Ece of final model vs random predictions
+        random_preds = np.random.uniform(0, 1, len(ytest))
+        random_ece = expected_calibration_error(ytest, random_preds)
+
+        print(f'Final model ECE: {ece}')
+        print(f'Random model ECE: {random_ece}')
+        
+
+        #Check how much lift the final model has on baseline dummy models for each of the baseline metrics
+        final_metrics = self.metrics
+        baseline_metrics = self.baseline_metrics
+
+        for dummy_model in baseline_metrics.keys():
+            for metric in baseline_metrics[dummy_model].keys():
+
+                lift = final_metrics[metric] - baseline_metrics[dummy_model][metric]
+
+                print(f'Final model performance on {metric}: {final_metrics[metric]}')
+                print(f'Final model lift over {dummy_model}_{metric}: {lift}')
+
+
+        self.next(self.package_models)
+
+    
+
+    @step
+    def package_models(self):
+        """
+        This step is used to save the models to disk. 
+        """
+        import joblib
+        from dotenv import load_dotenv
+        import os
+        # Load environment variables from .env
+        load_dotenv()
+
+        #Path to artifact registry
+        artifact_registry = os.getenv('ARTIFACT_REGISTRY')
+
+        # Save the model
+        joblib.dump(self.model, f'{artifact_registry}/main_model.pkl')
+        joblib.dump(self.calibration_model, f'{artifact_registry}/calibration_model.pkl')
+
+        #save optuna study
+        study = self.study
+        joblib.dump(study, f"{artifact_registry}/main_model_optuna_study.pkl")
 
         self.next(self.end)
-
 
     @step
     def end(self):
@@ -250,6 +384,7 @@ class TuningFlow(FlowSpec):
         Flow completed
         """
         pass
+
 
 if __name__ == "__main__":
     TuningFlow()
