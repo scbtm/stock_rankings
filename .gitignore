@@ -7,3 +7,4 @@ data_pipeline/__pycache__
 catboost_info
 .metaflow
 wandb/
+artifacts

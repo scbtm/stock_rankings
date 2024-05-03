@@ -347,7 +347,7 @@ class DataSplittingStrategy(DataStrategy):
 
         #calibration subset
         if self.calibration_max_date is None:
-            data['calibration'] = None
+            #data['calibration'] = None
             test_filter = pl.col('Date') > self.validation_max_date
             self.description = 'Splitting data into training, validation and test sets'
 
