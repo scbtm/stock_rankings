@@ -133,6 +133,7 @@ class TuningFlow(FlowSpec):
         #wandb_api_key = os.getenv('WANDB_API_KEY')
         project_name = os.getenv('WANDB_PROJECT_NAME')
         entity = os.getenv('WANDB_ENTITY')
+        self.n_trials = os.getenv('N_TRIALS')
 
         # Initialize W&B
         wandb.init(project=project_name, entity=entity)
@@ -220,7 +221,7 @@ class TuningFlow(FlowSpec):
 
         # Create Optuna study
         study = optuna.create_study(direction='maximize')
-        study.optimize(lambda trial: objective(trial = trial, dataset = self.dataset), n_trials=5)
+        study.optimize(lambda trial: objective(trial = trial, dataset = self.dataset), n_trials=self.n_trials)
 
         self.study = study
 
