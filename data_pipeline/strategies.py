@@ -367,3 +367,28 @@ class DataSplittingStrategy(DataStrategy):
         dataset.columns.append([(df_name, df.columns) for df_name, df in dataset.data.items()])
 
         return dataset
+    
+class BatchFilteringStrategy(DataStrategy):
+    def __init__(self, inference_threshold: dt) -> None:
+        self.inference_threshold = inference_threshold
+        self.description = 'Keep data after the inference threshold'
+
+    def apply(self, dataset: StockDataset) -> Dict[str, StockDataset]:
+        data = {}
+
+        if 'full_df' not in dataset.data:
+            raise ValueError('No data to split')
+            
+
+        df = dataset.data['full_df']
+
+        inference_filter = pl.col('Date') >= self.inference_threshold
+        #training subset
+        data['full_df'] = df.filter(inference_filter)
+
+        dataset.data = data
+        dataset.steps.append(self.description)
+        dataset.shape.append([(df_name, df.shape) for df_name, df in dataset.data.items()])
+        dataset.columns.append([(df_name, df.columns) for df_name, df in dataset.data.items()])
+
+        return dataset

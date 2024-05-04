@@ -55,12 +55,17 @@ class TrainingFlow(FlowSpec):
         dummy.fit(xtrain_dummy, ytrain_dummy)
         dummy_preds = dummy.predict(xtest)
 
+        rd_balanced_accuracy = balanced_accuracy_score(ytest, dummy_preds)
+        rd_precision = precision_score(ytest, dummy_preds)
+        rd_f1 = f1_score(ytest, dummy_preds)
+
         metrics = {}
         metrics['random_dummy'] = {'accuracy': accuracy_score(ytest, dummy_preds),
                                    'precision': precision_score(ytest, dummy_preds),
                                    'recall': recall_score(ytest, dummy_preds),
                                    'f1': f1_score(ytest, dummy_preds),
-                                   'balanced_accuracy': balanced_accuracy_score(ytest, dummy_preds)}
+                                   'balanced_accuracy': balanced_accuracy_score(ytest, dummy_preds),
+                                   'objective_fn': (rd_balanced_accuracy + rd_precision + rd_f1) / 3}
         
 
         #Most frequent classifier        
@@ -70,11 +75,16 @@ class TrainingFlow(FlowSpec):
 
         del xtrain_dummy, ytrain_dummy
 
+        mfd_balanced_accuracy = balanced_accuracy_score(ytest, dummy_preds)
+        mfd_precision = precision_score(ytest, dummy_preds)
+        mfd_f1 = f1_score(ytest, dummy_preds)
+
         metrics['most_frequent_dummy'] = {'accuracy': accuracy_score(ytest, dummy_preds),
                                           'precision': precision_score(ytest, dummy_preds),
                                           'recall': recall_score(ytest, dummy_preds),
                                           'f1': f1_score(ytest, dummy_preds),
-                                          'balanced_accuracy': balanced_accuracy_score(ytest, dummy_preds)}
+                                          'balanced_accuracy': balanced_accuracy_score(ytest, dummy_preds),
+                                          'objective_fn': (mfd_balanced_accuracy + mfd_precision + mfd_f1) / 3}
         self.baseline_metrics = metrics
 
         dataset = {}
@@ -191,6 +201,7 @@ class TrainingFlow(FlowSpec):
         import pandas as pd
         import numpy as np
         from sklearn.metrics import balanced_accuracy_score, accuracy_score, precision_score, recall_score, f1_score
+        import logging
 
         model = self.model
         calibration_model = self.calibration_model
@@ -209,20 +220,23 @@ class TrainingFlow(FlowSpec):
 
         ece = expected_calibration_error(ytest, predicted_proba)
 
+        objective_fn = (balanced_accuracy + precision + f1) / 3
+
         self.metrics = {'accuracy': accuracy,
                         'balanced_accuracy': balanced_accuracy,
                         'precision': precision,
                         'recall': recall,
                         'f1': f1,
-                        'ece': ece}
+                        'ece': ece,
+                        'objective_fn': objective_fn}
         
 
         #Ece of final model vs random predictions
         random_preds = np.random.uniform(0, 1, len(ytest))
         random_ece = expected_calibration_error(ytest, random_preds)
 
-        print(f'Final model ECE: {ece}')
-        print(f'Random model ECE: {random_ece}')
+        logging.info(f'Final model ECE: {ece}')
+        logging.info(f'Random model ECE: {random_ece}')
         
 
         #Check how much lift the final model has on baseline dummy models for each of the baseline metrics
@@ -234,8 +248,8 @@ class TrainingFlow(FlowSpec):
 
                 lift = final_metrics[metric] - baseline_metrics[dummy_model][metric]
 
-                print(f'Final model performance on {metric}: {final_metrics[metric]}')
-                print(f'Final model lift over {dummy_model}_{metric}: {lift}')
+                logging.info(f'Final model performance on {metric}: {final_metrics[metric]}')
+                logging.info(f'Final model lift over {dummy_model}_{metric}: {lift}')
 
 
         self.next(self.package_models)
@@ -247,6 +261,7 @@ class TrainingFlow(FlowSpec):
         """
         This step is used to save the models to disk. 
         """
+        import pandas as pd
         import joblib
         from dotenv import load_dotenv
         import os
@@ -283,6 +298,10 @@ class TrainingFlow(FlowSpec):
         
         # Optional: log additional metrics or information
         run.log(self.metrics)
+
+        today = pd.Timestamp.today().strftime('%Y-%m-%d')
+
+        run.notes = f"Model training stage using best hyperparameters from tuning stage. Date: {today}"
 
         # Finish the run
         run.finish()

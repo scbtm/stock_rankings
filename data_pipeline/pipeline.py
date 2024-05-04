@@ -180,7 +180,80 @@ class TrainingPipeline:
 
     
 class BatchProductionPipeline:
-    pass
+    def __init__(self, input_data_path: str, data_source: str = 'bucket') -> None:
+        self.input_data_path = input_data_path
+        self.data_source = data_source
+        self.pipeline = None
+    
+    def build(self) -> None:
+        data_source = self.data_source
+        input_data_path = self.input_data_path
+
+        if data_source == 'bucket':
+            #Load data from GCS bucket
+            step1 = GCSCSVLoadStrategy(bucket = input_data_path, use_columns=['Date', 'Open', 'High', 'Low', 'Close', 'Volume', 'Ticker'])
+        else:
+            step1 = LocalCSVLoadStrategy(path = input_data_path, use_columns=['Date', 'Open', 'High', 'Low', 'Close', 'Volume', 'Ticker'])
+        #get the right data types
+        dtypes = {
+            'Date': pl.Date(),
+            'Open': pl.Float32(),
+            'High': pl.Float32(),
+            'Low': pl.Float32(),
+            'Close': pl.Float32(),
+            'Volume': pl.Int64(),
+            }
+        
+        step2 = DataCastingStrategy(dtypes = dtypes)
+
+        #Fill information to have a complete dataset for every day of the calendar
+        step3 = FillInformationStrategy(date_column = 'Date', id_column = 'Ticker', interval = '1d')
+
+        #filter data to only have the last 4 months
+        inference_threshold = (dt.today() - td(days=30*4))
+        step4 = BatchFilteringStrategy(inference_threshold = inference_threshold)
+
+        #Techincal indicators
+        step5 = TechnicalIndicatorsStrategy(id_column = 'Ticker')
+
+        #Enrich data
+        step6 = RowLevelEnrichmentStrategy()
+
+        #Create target variable
+        step7 = TargetVariableCreationStrategy(target_column = 'Close', id_column = 'Ticker', horizon = 15)
+
+        #Feature engineering
+        timepoints = [5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90]
+        step8 = FeatureEngineeringStrategy(id_column = 'Ticker', timepoints = timepoints)
+
+        #Get date features
+        step9 = TimeFeaturesStrategy(date_column = 'Date')
+
+        #drop if any missing values on target column
+        #we will not drop nulls here, we will drop them after inference is made, to measure performance
+        #step10 = DropTargetNullsStrategy(target_column = 'target')
+
+
+        pipeline = Pipeline()
+        pipeline.add_strategy(step1)
+        pipeline.add_strategy(step2)
+        pipeline.add_strategy(step3)
+        pipeline.add_strategy(step4)
+        pipeline.add_strategy(step5)
+        pipeline.add_strategy(step6)
+        pipeline.add_strategy(step7)
+        pipeline.add_strategy(step8)
+        pipeline.add_strategy(step9)
+
+        self.pipeline = pipeline
+
+    def run(self) -> StockDataset:
+
+        if self.pipeline is None:
+            self.build()
+        
+        dataset = self.pipeline.apply()
+        return dataset
 
 class RealTimeProductionPipeline:
     pass
