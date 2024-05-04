@@ -39,6 +39,7 @@ class BatchInferenceFlow(FlowSpec):
         dataset = {}
         dataset['xinf'] = xinf
         dataset['yinf'] = yinf
+        dataset['info_df'] = dataset.data['full_df'][['Date', 'Ticker']]
 
         self.dataset = dataset
 
@@ -137,7 +138,13 @@ class BatchInferenceFlow(FlowSpec):
         
         #The most recent observations in ytest are null values, so we need to remove them and compare predictions to the ones we do have
         
-        predictions_df = pl.DataFrame({'ytest': ytest, 'predicted_proba': predicted_proba, 'preds': preds})
+        predictions_df = self.dataset['info_df']
+
+        predictions_df = pl.concat(
+            [pl.DataFrame({'ytest': ytest, 'predicted_proba': predicted_proba, 'preds': preds}),
+             predictions_df],
+             how = 'horizontal'
+             )
 
         self.predictions_df = predictions_df
 
