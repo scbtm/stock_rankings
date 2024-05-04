@@ -37,9 +37,9 @@ class BatchInferenceFlow(FlowSpec):
         yinf = yinf.to_pandas().values
 
         dataset = {}
+        dataset['info_df'] = dataset.data['full_df'][['Date', 'Ticker']]
         dataset['xinf'] = xinf
         dataset['yinf'] = yinf
-        dataset['info_df'] = dataset.data['full_df'][['Date', 'Ticker']]
 
         self.dataset = dataset
 
