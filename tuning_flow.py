@@ -133,8 +133,8 @@ class TuningFlow(FlowSpec):
         #wandb_api_key = os.getenv('WANDB_API_KEY')
         project_name = os.getenv('WANDB_PROJECT_NAME')
         entity = os.getenv('WANDB_ENTITY')
-        self.n_trials = os.getenv('N_TRIALS')
-        gpu_available = os.getenv('GPU_AVAILABLE')
+        self.n_trials = int(os.getenv('N_TRIALS'))
+        gpu_available = int(os.getenv('GPU_AVAILABLE'))
 
         if gpu_available == 1:
             gpu_available = True
