@@ -134,6 +134,12 @@ class TuningFlow(FlowSpec):
         project_name = os.getenv('WANDB_PROJECT_NAME')
         entity = os.getenv('WANDB_ENTITY')
         self.n_trials = os.getenv('N_TRIALS')
+        gpu_available = os.getenv('GPU_AVAILABLE')
+
+        if gpu_available == 1:
+            gpu_available = True
+        else:
+            gpu_available = False
 
         # Initialize W&B
         wandb.init(project=project_name, entity=entity)
@@ -145,6 +151,9 @@ class TuningFlow(FlowSpec):
             train_size = len(xtrain)
             #Define hyperparameters to tune
             params = {}
+
+            if gpu_available:
+                params['task_type'] = 'GPU'
 
             params['random_state'] = 1
             params['learning_rate'] = trial.suggest_float('learning_rate', 0.01, 0.3)
