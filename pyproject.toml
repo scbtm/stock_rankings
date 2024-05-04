@@ -19,6 +19,8 @@ python-dotenv = "^1.0.1"
 shap = "^0.45.0"
 wandb = "^0.16.6"
 metaflow = "^2.11.10"
+fsspec = "^2024.3.1"
+gcsfs = "^2024.3.1"
 
 [[tool.poetry.packages]]
 include = "data_pipeline"
